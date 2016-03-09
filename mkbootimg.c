@@ -33,17 +33,19 @@
 #include <err.h>
 #include <stdint.h>
 
-#include "libfdt.h"
-#include "mincrypt/sha.h"
+#include <libfdt.h>
+#include <openssl/sha.h>
 #include "bootimg.h"
 
 #define DTBH_MAGIC         "DTBH"
 #define DTBH_VERSION       2
-#define DTBH_PLATFORM      "k3g"
-#define DTBH_SUBTYPE       "k3g_eur_open"
+#define DTBH_PLATFORM      "android"
+#define DTBH_SUBTYPE       "samsung"
 /* Hardcoded entry */
-#define DTBH_PLATFORM_CODE 0x1e92
-#define DTBH_SUBTYPE_CODE  0x7d64f612
+#define DTBH_PLATFORM_CODE 0x50a6
+#define DTBH_SUBTYPE_CODE  0x217584da
+ #define SHA_DIGEST_SIZE 20
+
 
 struct dt_blob;
 
@@ -332,6 +334,7 @@ int usage(void)
             "       [ --dt <filename> ]\n"
             "       [ --signature <filename> ]\n"
             "       -o|--output <filename>\n"
+	    "       ********** OR --mdt yes and --dt_dir <dtb path> for make only dtbh for sm-a310f  ***********\n"
             );
     return 1;
 }
@@ -372,6 +375,7 @@ int main(int argc, char **argv)
     char *bootimg = 0;
     char *board = "";
     char *dt_dir = 0;
+    int  *mdt = 0;
     char *dt_fn = 0;
     void *dt_data = 0;
     char *sig_fn = 0;
@@ -415,6 +419,8 @@ int main(int argc, char **argv)
             kernel_offset = strtoul(val, 0, 16);
         } else if(!strcmp(arg, "--ramdisk_offset")) {
             ramdisk_offset = strtoul(val, 0, 16);
+        } else if(!strcmp(arg, "--mdt")) {
+            mdt=1;
         } else if(!strcmp(arg, "--second_offset")) {
             second_offset = strtoul(val, 0, 16);
         } else if(!strcmp(arg, "--tags_offset")) {
@@ -448,6 +454,36 @@ int main(int argc, char **argv)
         fprintf(stderr,"error: don't use both --dt_dir and --dt option\n");
         return usage();
     }
+
+    if (mdt==1)
+    {
+
+
+        if (dt_dir) {
+        	dt_data = load_dtbh_block(dt_dir, pagesize, &hdr.dt_size);
+        	if (dt_data == 0) {
+            	fprintf(stderr, "error: could not load device tree blobs '%s'\n", dt_dir);
+            	return 1;
+        	}
+    	}
+
+
+
+
+    	fd = open("boot.img-dt", O_CREAT | O_TRUNC | O_WRONLY, 0644);
+    	if(fd < 0) {
+        	fprintf(stderr,"error: could not create '%s'\n", bootimg);
+        	return 1;
+    	}
+    	if(dt_data) {
+        	if(write(fd, dt_data, hdr.dt_size) != hdr.dt_size) goto fail;
+    	}
+    	close(fd);
+	return 0;
+    }
+
+
+
 
     if(bootimg == 0) {
         fprintf(stderr,"error: no output filename specified\n");
@@ -531,20 +567,20 @@ int main(int argc, char **argv)
     /* put a hash of the contents in the header so boot images can be
      * differentiated based on their first 2k.
      */
-    SHA_init(&ctx);
-    SHA_update(&ctx, kernel_data, hdr.kernel_size);
-    SHA_update(&ctx, &hdr.kernel_size, sizeof(hdr.kernel_size));
-    SHA_update(&ctx, ramdisk_data, hdr.ramdisk_size);
-    SHA_update(&ctx, &hdr.ramdisk_size, sizeof(hdr.ramdisk_size));
-    SHA_update(&ctx, second_data, hdr.second_size);
-    SHA_update(&ctx, &hdr.second_size, sizeof(hdr.second_size));
+    SHA_Init(&ctx);
+    SHA_Update(&ctx, kernel_data, hdr.kernel_size);
+    SHA_Update(&ctx, &hdr.kernel_size, sizeof(hdr.kernel_size));
+    SHA_Update(&ctx, ramdisk_data, hdr.ramdisk_size);
+    SHA_Update(&ctx, &hdr.ramdisk_size, sizeof(hdr.ramdisk_size));
+    SHA_Update(&ctx, second_data, hdr.second_size);
+    SHA_Update(&ctx, &hdr.second_size, sizeof(hdr.second_size));
     if(dt_data) {
-        SHA_update(&ctx, dt_data, hdr.dt_size);
-        SHA_update(&ctx, &hdr.dt_size, sizeof(hdr.dt_size));
+        SHA_Update(&ctx, dt_data, hdr.dt_size);
+        SHA_Update(&ctx, &hdr.dt_size, sizeof(hdr.dt_size));
     }
-    sha = SHA_final(&ctx);
-    memcpy(hdr.id, sha,
-           SHA_DIGEST_SIZE > sizeof(hdr.id) ? sizeof(hdr.id) : SHA_DIGEST_SIZE);
+    sha = SHA_Final(hdr.id,&ctx);
+    //memcpy(hdr.id, sha,
+    //       SHA_DIGEST_SIZE > sizeof(hdr.id) ? sizeof(hdr.id) : SHA_DIGEST_SIZE);
 
     fd = open(bootimg, O_CREAT | O_TRUNC | O_WRONLY, 0644);
     if(fd < 0) {
